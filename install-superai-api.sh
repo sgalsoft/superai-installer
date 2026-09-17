@@ -158,6 +158,12 @@ github_curl() {
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "$@"
 }
+github_asset_curl() {
+    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 300 \
+        -H "Accept: application/octet-stream" \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "$@"
+}
 verify_github_access() {
     section "Checking GitHub access"
     if ! github_curl "${GITHUB_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}" >/dev/null; then
@@ -244,7 +250,7 @@ download_asset() {
     [[ -n "${asset_id}" ]] || die "Release asset ID is missing."
     log "Asset: ${SELECTED_ASSET_NAME}"; log "Asset ID: ${asset_id}"
     [[ -n "${asset_size}" ]] && log "Expected size: ${asset_size} bytes"
-    github_curl -H "Accept: application/octet-stream" "${GITHUB_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/assets/${asset_id}" -o "${DOWNLOAD_FILE}"
+    github_asset_curl "${GITHUB_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/assets/${asset_id}" -o "${DOWNLOAD_FILE}"
     [[ -s "${DOWNLOAD_FILE}" ]] || die "Downloaded asset is empty."
     actual_size="$(stat -c '%s' "${DOWNLOAD_FILE}" 2>/dev/null || stat -f '%z' "${DOWNLOAD_FILE}")"
     if [[ -n "${asset_size}" && "${asset_size}" != "null" && "${actual_size}" != "${asset_size}" ]]; then die "Downloaded file size mismatch.\n\nExpected:\n  ${asset_size}\n\nActual:\n  ${actual_size}\n"; fi
