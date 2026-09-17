@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# SuperAI API Installer
+# superai api installer
 #
 # Public installer:
-#   https://github.com/Sgalsoft/...
+#   https://github.com/sgalsoft/superai-installer
 #
 # Private application repository:
-#   https://github.com/Sgalcheung/superai-api
+#   https://github.com/sgalcheung/superai-api
 #
 # Usage:
 #   sudo bash install-superai-api.sh
@@ -40,7 +40,7 @@ BINARY_PATH="${INSTALL_DIR}/${APP_NAME}"
 ENV_FILE="${INSTALL_DIR}/.env"
 VERSION_FILE="${INSTALL_DIR}/VERSION"
 SYSTEMD_UNIT="/etc/systemd/system/${APP_NAME}.service"
-GITHUB_OWNER="Sgalcheung"
+GITHUB_OWNER="sgalcheung"
 GITHUB_REPO="superai-api"
 GITHUB_API="https://api.github.com"
 GITHUB_API_VERSION="2026-03-10"
@@ -132,10 +132,23 @@ validate_port() {
 }
 
 ensure_github_token() {
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then return; fi
-    echo; echo -e "${BOLD}GitHub authentication required${RESET}"; echo
-    echo "Private repository:"; echo "  https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"; echo
-    echo "Required Fine-grained PAT permission:"; echo "  Contents: Read"; echo
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        return
+    fi
+
+    echo
+    echo -e "${BOLD}GitHub authentication required${RESET}"
+    echo
+    echo "The latest superai-api release is private and requires a GitHub token."
+    echo
+    echo "Repository:"
+    echo "  https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
+    echo
+    echo "Required Fine-grained PAT permission:"
+    echo "  Contents: Read"
+    echo
+    echo "The token is used only for this installation and is not saved to disk."
+    echo
     read_secret "GitHub Fine-grained PAT: " GITHUB_TOKEN
     [[ -n "${GITHUB_TOKEN}" ]] || die "GitHub token cannot be empty."
 }
@@ -147,7 +160,17 @@ github_curl() {
 }
 verify_github_access() {
     section "Checking GitHub access"
-    github_curl "${GITHUB_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}" >/dev/null
+    if ! github_curl "${GITHUB_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}" >/dev/null; then
+        echo
+        error "GitHub authentication failed or the token cannot access the private repository."
+        echo
+        echo "Please check:"
+        echo "  - The token is valid and has not expired."
+        echo "  - Repository access includes: ${GITHUB_OWNER}/${GITHUB_REPO}"
+        echo "  - Repository permission: Contents: Read"
+        echo
+        die "Create a Fine-grained PAT with access limited to ${GITHUB_OWNER}/${GITHUB_REPO}."
+    fi
     success "GitHub authentication successful."
 }
 
@@ -337,7 +360,7 @@ create_systemd_service() {
     section "Configuring systemd"
     cat > "${SYSTEMD_UNIT}" <<EOF
 [Unit]
-Description=SuperAI API
+Description=superai api
 Documentation=https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}
 Wants=network-online.target
 After=network-online.target
@@ -401,17 +424,17 @@ wait_for_port() {
 restart_and_verify() { systemctl daemon-reload; start_service; wait_for_service || return 1; wait_for_port || true; return 0; }
 
 install_command() {
-    section "Installing SuperAI API"
-    [[ ! -e "${INSTALL_DIR}" || ! -f "${BINARY_PATH}" ]] || die "SuperAI API is already installed. Use 'upgrade' instead."
+    section "Installing superai api"
+    [[ ! -e "${INSTALL_DIR}" || ! -f "${BINARY_PATH}" ]] || die "superai api is already installed. Use 'upgrade' instead."
     validate_port; detect_arch; ensure_github_token; verify_github_access; prepare_tmp_dir; fetch_latest_release; find_release_asset; download_asset
     ensure_service_user; prepare_directories; create_env_file; check_postgres; install_downloaded_binary; create_systemd_service
     restart_and_verify || die "Installation completed, but the service failed to start."
     section "Installation completed"
-    echo; echo -e "${GREEN}${BOLD}SuperAI API installed successfully.${RESET}"; echo; echo "Version:"; echo "  ${RELEASE_VERSION}"; echo; echo "Binary:"; echo "  ${BINARY_PATH}"; echo; echo "Config:"; echo "  ${ENV_FILE}"; echo; echo "Service:"; echo "  ${APP_NAME}.service"; echo; echo "Port:"; echo "  ${PORT}"; echo; echo "Useful commands:"; echo "  systemctl status ${APP_NAME}"; echo "  systemctl restart ${APP_NAME}"; echo "  journalctl -u ${APP_NAME} -f"; echo
+    echo; echo -e "${GREEN}${BOLD}superai api installed successfully.${RESET}"; echo; echo "Version:"; echo "  ${RELEASE_VERSION}"; echo; echo "Binary:"; echo "  ${BINARY_PATH}"; echo; echo "Config:"; echo "  ${ENV_FILE}"; echo; echo "Service:"; echo "  ${APP_NAME}.service"; echo; echo "Port:"; echo "  ${PORT}"; echo; echo "Useful commands:"; echo "  systemctl status ${APP_NAME}"; echo "  systemctl restart ${APP_NAME}"; echo "  journalctl -u ${APP_NAME} -f"; echo
 }
 upgrade_command() {
-    section "Upgrading SuperAI API"
-    [[ -f "${BINARY_PATH}" && -f "${VERSION_FILE}" ]] || die "SuperAI API is not installed."
+    section "Upgrading superai api"
+    [[ -f "${BINARY_PATH}" && -f "${VERSION_FILE}" ]] || die "superai api is not installed."
     validate_port; detect_arch; ensure_github_token; verify_github_access; prepare_tmp_dir; fetch_latest_release
     local current_version; current_version="$(cat "${VERSION_FILE}")"; echo; echo "Current version:"; echo "  ${current_version}"; echo; echo "Latest version:"; echo "  ${RELEASE_VERSION}"; echo
     if [[ "${current_version}" == "${RELEASE_VERSION}" ]]; then success "Already running the latest version."; return 0; fi
@@ -428,21 +451,21 @@ status_command() {
     if [[ -f "${ENV_FILE}" ]]; then local configured_port; configured_port="$(env_get "PORT")"; [[ -n "${configured_port}" ]] && echo "Port:     ${configured_port}"; fi
     echo; systemctl --no-pager --full status "${APP_NAME}.service" || true
 }
-restart_command() { section "Restarting ${APP_NAME}"; [[ -f "${BINARY_PATH}" ]] || die "SuperAI API is not installed."; restart_and_verify; }
+restart_command() { section "Restarting ${APP_NAME}"; [[ -f "${BINARY_PATH}" ]] || die "superai api is not installed."; restart_and_verify; }
 uninstall_command() {
     section "Uninstalling ${APP_NAME}"
-    if [[ ! -e "${INSTALL_DIR}" && ! -e "${SYSTEMD_UNIT}" ]]; then success "SuperAI API is not installed."; return; fi
+    if [[ ! -e "${INSTALL_DIR}" && ! -e "${SYSTEMD_UNIT}" ]]; then success "superai api is not installed."; return; fi
     echo; echo "This will remove:"; echo; echo "  ${INSTALL_DIR}"; echo "  ${SYSTEMD_UNIT}"; echo; echo "The PostgreSQL database will NOT be deleted."; echo "The Redis database will NOT be deleted."; echo
     if ! confirm "Continue?"; then echo "Cancelled."; return 0; fi
     systemctl stop "${APP_NAME}.service" 2>/dev/null || true; systemctl disable "${APP_NAME}.service" 2>/dev/null || true; rm -f "${SYSTEMD_UNIT}"; systemctl daemon-reload; rm -rf "${INSTALL_DIR}"
     if id "${APP_USER}" >/dev/null 2>&1; then userdel "${APP_USER}" 2>/dev/null || true; fi
     if getent group "${APP_GROUP}" >/dev/null 2>&1; then groupdel "${APP_GROUP}" 2>/dev/null || true; fi
-    success "SuperAI API has been uninstalled."; echo; echo "PostgreSQL and Redis were not modified."
+    success "superai api has been uninstalled."; echo; echo "PostgreSQL and Redis were not modified."
 }
 usage() {
     cat <<EOF
 
-SuperAI API Installer
+superai api installer
 
 Usage:
   sudo bash install-superai-api.sh <command>
