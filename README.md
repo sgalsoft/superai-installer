@@ -1,16 +1,16 @@
-# SuperAI API Installer
+# superai api installer
 
-Public installer for the private `Sgalcheung/superai-api` project.
+Public installer for the private `sgalcheung/superai-api` project.
 
-## What it does
+## what it does
 
-`install-superai-api.sh` installs and manages the SuperAI API binary published as a GitHub Release asset in the private application repository.
+`install-superai-api.sh` installs and manages the superai api binary published as a GitHub release asset in the private application repository.
 
 The installer supports:
 
 - Linux `amd64` and `arm64`
-- Latest stable GitHub Release discovery
-- Private GitHub Release asset download using a Fine-grained PAT
+- Latest stable GitHub release discovery
+- Private GitHub release asset download using a Fine-grained PAT
 - SHA-256 verification when GitHub provides an asset digest
 - PostgreSQL configuration
 - Optional Redis configuration
@@ -18,18 +18,26 @@ The installer supports:
 - Upgrade with automatic binary backup and rollback
 - Status, restart, and uninstall commands
 
-## Requirements
+## requirements
 
 - Linux with systemd
 - `root` privileges
 - Network access to GitHub
-- A GitHub Fine-grained Personal Access Token with **Contents: Read** access to `Sgalcheung/superai-api`
+- A GitHub Fine-grained Personal Access Token with **Contents: Read** access to `sgalcheung/superai-api`
 - PostgreSQL reachable using the configured `SQL_DSN`
 - Redis is optional
 
-## Install
+## install
 
-After downloading this repository:
+The default installation mode is interactive. Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sgalsoft/superai-installer/main/install-superai-api.sh | sudo bash
+```
+
+The installer will securely prompt for the GitHub Fine-grained PAT and PostgreSQL connection string when they are not provided through environment variables. The GitHub token is read without echoing and is not written to the application `.env`, systemd unit, installation directory, or repository.
+
+You can also run a local copy:
 
 ```bash
 sudo bash install-superai-api.sh
@@ -41,9 +49,26 @@ Equivalent explicit command:
 sudo bash install-superai-api.sh install
 ```
 
-The installer prompts for the GitHub token and PostgreSQL connection string when they are not supplied through environment variables.
+## github token
 
-## Non-interactive configuration
+The installer uses a **separate Fine-grained PAT** for downloading private release assets. GitHub Actions does not provide its `GITHUB_TOKEN` to the installer.
+
+Create a Fine-grained PAT with:
+
+```text
+Repository access:
+  Only select repositories
+  sgalcheung/superai-api
+
+Repository permissions:
+  Contents: Read-only
+```
+
+For the normal interactive installation, do not put the token on the command line. The installer prompts for it through `/dev/tty` so it works with the `curl | sudo bash` installation method.
+
+### optional non-interactive mode
+
+For automated server provisioning, `GITHUB_TOKEN` can be supplied through the environment:
 
 ```bash
 GITHUB_TOKEN="YOUR_FINE_GRAINED_PAT" \
@@ -54,9 +79,11 @@ TZ="Asia/Shanghai" \
 sudo -E bash install-superai-api.sh install
 ```
 
-For security, do not commit the token to this repository or place it in the installer source code.
+The environment variable is optional; **interactive input remains the default**.
 
-## Commands
+For security, never commit the token to this repository.
+
+## commands
 
 ```text
 sudo bash install-superai-api.sh install
@@ -69,7 +96,7 @@ sudo bash install-superai-api.sh help
 
 Running the script without a command is equivalent to `install`.
 
-## Release asset names
+## release asset names
 
 The installer automatically detects Linux assets for the current architecture. The canonical names are:
 
@@ -84,9 +111,7 @@ If the release uses another exact asset name, set `ASSET_NAME` explicitly:
 ASSET_NAME="your-release-asset" sudo bash install-superai-api.sh install
 ```
 
-## Installation paths
-
-The installer uses:
+## installation paths
 
 ```text
 /opt/superai-api/
@@ -106,31 +131,44 @@ The systemd unit is:
 
 The service runs as the dedicated `superai-api` system user.
 
-## Security notes
+## security notes
 
 - Keep the GitHub token private.
-- Use a Fine-grained PAT scoped only to the private application repository with the minimum required permission: **Contents: Read**.
+- Use a Fine-grained PAT scoped only to `sgalcheung/superai-api` with **Contents: Read**.
 - The installer does not store the GitHub token in `/opt/superai-api/.env`.
 - The application `.env` is created with mode `0600`.
-- The systemd service uses several hardening options and runs without root privileges.
+- The systemd service runs without root privileges and uses service hardening options.
 - PostgreSQL and Redis data are not deleted by `uninstall`.
 
-## Architecture
+## token architecture
 
 ```text
-sgalsoft/superai-installer  (public)
-            │
-            │ GitHub Fine-grained PAT
-            ▼
-sgalcheung/superai-api      (private)
-            │
-            ├── Releases
-            │    ├── superai-api-linux-amd64
-            │    └── superai-api-linux-arm64
-            │
-            └── Source code
+release side:
+sgalcheung/superai-api
+        │
+        │ GitHub Actions
+        │ GITHUB_TOKEN
+        │ contents: write
+        ▼
+GitHub release
+        │
+        ├── superai-api-linux-amd64
+        └── superai-api-linux-arm64
+
+installer side:
+sgalsoft/superai-installer
+        │
+        │ Fine-grained PAT
+        │ contents: read
+        ▼
+private GitHub release
+        │
+        ▼
+/opt/superai-api
 ```
 
-## License
+The Actions `GITHUB_TOKEN` and the installer Fine-grained PAT are separate credentials with separate responsibilities. The installer PAT is never embedded in the public repository or GitHub Actions workflow.
+
+## license
 
 See [LICENSE](LICENSE).
