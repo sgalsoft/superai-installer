@@ -53,7 +53,7 @@ fi
     exit 1
 }
 
-export PGPASSWORD="${PGPASSWORD:-}"
+export SUPERAI_DB_PASSWORD="${DB_PASSWORD}"
 
 echo
 echo "PostgreSQL admin connection:"
@@ -73,8 +73,9 @@ psql -X -v ON_ERROR_STOP=1 \
     -U "${PGUSER}" \
     -d "${PGDATABASE}" \
     -v superai_db_user="${DB_USER}" \
-    -v superai_db_name="${DB_NAME}" \
-    -v superai_db_password="${DB_PASSWORD}" <<'SQL'
+    -v superai_db_name="${DB_NAME}" <<'SQL'
+getenv superai_db_password SUPERAI_DB_PASSWORD
+
 SELECT format(
     'CREATE ROLE %I LOGIN PASSWORD %L',
     :'superai_db_user',
@@ -84,13 +85,13 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM pg_roles
     WHERE rolname = :'superai_db_user'
-) gexec
+) \gexec
 
 SELECT format(
     'ALTER ROLE %I LOGIN PASSWORD %L',
     :'superai_db_user',
     :'superai_db_password'
-) gexec
+) \gexec
 
 SELECT format(
     'CREATE DATABASE %I OWNER %I',
@@ -101,16 +102,16 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM pg_database
     WHERE datname = :'superai_db_name'
-) gexec
+) \gexec
 
 SELECT format(
     'ALTER DATABASE %I OWNER TO %I',
     :'superai_db_name',
     :'superai_db_user'
-) gexec
+) \gexec
 SQL
 
-unset PGPASSWORD DB_PASSWORD
+unset SUPERAI_DB_PASSWORD DB_PASSWORD
 
 echo
 echo "superai PostgreSQL role and database are ready."
