@@ -74,7 +74,7 @@ psql -X -v ON_ERROR_STOP=1 \
     -d "${PGDATABASE}" \
     -v superai_db_user="${DB_USER}" \
     -v superai_db_name="${DB_NAME}" <<'SQL'
-getenv superai_db_password SUPERAI_DB_PASSWORD
+\getenv superai_db_password SUPERAI_DB_PASSWORD
 
 SELECT format(
     'CREATE ROLE %I LOGIN PASSWORD %L',
