@@ -641,10 +641,10 @@ restart_and_verify() { systemctl daemon-reload; start_service; wait_for_service 
 
 install_command() {
     section "Installing superai api"
-    if [[ -f "${BINARY_PATH}" && -f "${SYSTEMD_UNIT}" ]]; then
-        die "superai api is already installed. Use 'upgrade' instead."
+    if [[ -f "${BINARY_PATH}" && -f "${SYSTEMD_UNIT}" ]] && systemctl is-active --quiet "${APP_NAME}.service"; then
+        die "superai api is already installed and running. Use 'upgrade' instead."
     fi
-    if [[ -f "${BINARY_PATH}" || -f "${ENV_FILE}" || -f "${VERSION_FILE}" ]]; then
+    if [[ -f "${BINARY_PATH}" || -f "${ENV_FILE}" || -f "${VERSION_FILE}" || -f "${SYSTEMD_UNIT}" ]]; then
         warn "Detected an incomplete previous installation. Resuming installation."
     fi
     validate_port; detect_arch; ensure_github_token; verify_github_access; prepare_tmp_dir; fetch_latest_release; find_release_asset; download_asset
