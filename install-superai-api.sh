@@ -641,7 +641,12 @@ restart_and_verify() { systemctl daemon-reload; start_service; wait_for_service 
 
 install_command() {
     section "Installing superai api"
-    [[ ! -e "${INSTALL_DIR}" || ! -f "${BINARY_PATH}" ]] || die "superai api is already installed. Use 'upgrade' instead."
+    if [[ -f "${BINARY_PATH}" && -f "${SYSTEMD_UNIT}" ]]; then
+        die "superai api is already installed. Use 'upgrade' instead."
+    fi
+    if [[ -f "${BINARY_PATH}" || -f "${ENV_FILE}" || -f "${VERSION_FILE}" ]]; then
+        warn "Detected an incomplete previous installation. Resuming installation."
+    fi
     validate_port; detect_arch; ensure_github_token; verify_github_access; prepare_tmp_dir; fetch_latest_release; find_release_asset; download_asset
     ensure_service_user; prepare_directories; create_env_file; initialize_postgres_database; check_postgres; install_downloaded_binary; create_systemd_service
     restart_and_verify || die "Installation completed, but the service failed to start."
