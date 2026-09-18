@@ -19,6 +19,11 @@
 #
 # Environment variables:
 #   GITHUB_TOKEN
+#   DB_HOST
+#   DB_PORT
+#   DB_NAME
+#   DB_USER
+#   DB_PASSWORD
 #   SQL_DSN
 #   REDIS_CONN_STRING
 #   PORT
@@ -273,15 +278,69 @@ prepare_directories() {
     success "Directories prepared."
 }
 generate_secret() { if command_exists openssl; then openssl rand -hex 32; return; fi; od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
+urlencode() { jq -nr --arg value "$1" '${value}|@uri'; }
 env_get() { local key="$1"; [[ -f "${ENV_FILE}" ]] || return 0; awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, "", $0); print $0; exit}' "${ENV_FILE}"; }
 env_has() { local key="$1"; grep -Eq "^${key}=" "${ENV_FILE}" 2>/dev/null; }
 env_set_if_missing() { local key="$1" value="$2"; if ! env_has "${key}"; then printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"; fi; }
+
+validate_db_host() {
+    [[ -n "${DB_HOST}" ]] || die "DB_HOST cannot be empty."
+    case "${DB_HOST}" in
+        localhost|127.0.0.1|127.*|::1|0.0.0.0)
+            die "DB_HOST must use the PostgreSQL internal network address, not ${DB_HOST}.";
+            ;;
+    esac
+}
+
+build_sql_dsn() {
+    local encoded_user encoded_password encoded_db
+    encoded_user="$(urlencode "${DB_USER}")"
+    encoded_password="$(urlencode "${DB_PASSWORD}")"
+    encoded_db="$(urlencode "${DB_NAME}")"
+    SQL_DSN="postgresql://${encoded_user}:${encoded_password}@${DB_HOST}:${DB_PORT}/${encoded_db}?sslmode=disable"
+}
+
+configure_database() {
+    if [[ -n "${SQL_DSN:-}" ]]; then
+        log "Using SQL_DSN override."
+        return
+    fi
+
+    echo
+    echo -e "${BOLD}PostgreSQL internal network configuration${RESET}"
+    echo
+    echo "Use the private address or internal DNS name of the PostgreSQL server."
+    echo "The installer does not use localhost/loopback for PostgreSQL."
+    echo
+    if [[ -z "${DB_HOST}" ]]; then
+        read_input "PostgreSQL internal host: " DB_HOST
+    fi
+    validate_db_host
+
+    read_input "PostgreSQL port [${DB_PORT}]: " input_db_port
+    [[ -z "${input_db_port}" ]] || DB_PORT="${input_db_port}"
+
+    read_input "PostgreSQL database [${DB_NAME}]: " input_db_name
+    [[ -z "${input_db_name}" ]] || DB_NAME="${input_db_name}"
+
+    read_input "PostgreSQL user [${DB_USER}]: " input_db_user
+    [[ -z "${input_db_user}" ]] || DB_USER="${input_db_user}"
+
+    if [[ -z "${DB_PASSWORD}" ]]; then
+        read_secret "PostgreSQL password: " DB_PASSWORD
+    fi
+    [[ -n "${DB_PASSWORD}" ]] || die "DB_PASSWORD cannot be empty."
+
+    build_sql_dsn
+    log "PostgreSQL target: ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    log "PostgreSQL user: ${DB_USER}"
+}
+
 create_env_file() {
     section "Configuring environment"
     umask 077
     if [[ ! -f "${ENV_FILE}" ]]; then
-        if [[ -z "${SQL_DSN:-}" ]]; then echo; echo -e "${BOLD}PostgreSQL configuration${RESET}"; echo; echo "Example:"; echo "  postgres://user:password@127.0.0.1:5432/newapi"; echo; read_input "SQL_DSN: " SQL_DSN; fi
-        [[ -n "${SQL_DSN:-}" ]] || die "SQL_DSN cannot be empty."
+        configure_database
         if [[ -z "${REDIS_CONN_STRING:-}" ]]; then echo; echo "Redis is optional."; echo "Example:"; echo "  redis://127.0.0.1:6379"; echo; read_input "REDIS_CONN_STRING (press Enter to skip): " REDIS_CONN_STRING; fi
         local session_secret crypto_secret; session_secret="$(generate_secret)"; crypto_secret="$(generate_secret)"
         cat > "${ENV_FILE}" <<EOF
@@ -291,6 +350,10 @@ create_env_file() {
 # ============================================================
 
 # Database
+DB_HOST=${DB_HOST}
+DB_PORT=${DB_PORT}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
 SQL_DSN=${SQL_DSN}
 
 # Redis
@@ -311,6 +374,20 @@ ERROR_LOG_ENABLED=true
 BATCH_UPDATE_ENABLED=true
 EOF
     else
+        if ! env_has "SQL_DSN"; then
+            configure_database
+            env_set_if_missing "DB_HOST" "${DB_HOST}"
+            env_set_if_missing "DB_PORT" "${DB_PORT}"
+            env_set_if_missing "DB_NAME" "${DB_NAME}"
+            env_set_if_missing "DB_USER" "${DB_USER}"
+            env_set_if_missing "SQL_DSN" "${SQL_DSN}"
+        else
+            SQL_DSN="$(env_get "SQL_DSN")"
+            DB_HOST="$(env_get "DB_HOST")"
+            DB_PORT="$(env_get "DB_PORT")"
+            DB_NAME="$(env_get "DB_NAME")"
+            DB_USER="$(env_get "DB_USER")"
+        fi
         if ! env_has "SESSION_SECRET"; then env_set_if_missing "SESSION_SECRET" "$(generate_secret)"; fi
         if ! env_has "CRYPTO_SECRET"; then env_set_if_missing "CRYPTO_SECRET" "$(generate_secret)"; fi
         env_set_if_missing "PORT" "${PORT}"; env_set_if_missing "TZ" "${TZ}"; log "Existing .env preserved."
@@ -497,8 +574,23 @@ Environment variables:
       GitHub Fine-grained PAT.
       Required permission:
         Contents: Read
+  DB_HOST
+      PostgreSQL private/internal network hostname or IP address.
+      localhost/127.0.0.1 is not accepted.
+  DB_PORT
+      Default:
+        ${DEFAULT_DB_PORT}
+  DB_NAME
+      Default:
+        ${DEFAULT_DB_NAME}
+  DB_USER
+      Default:
+        ${DEFAULT_DB_USER}
+  DB_PASSWORD
+      PostgreSQL password for DB_USER.
   SQL_DSN
-      PostgreSQL connection string.
+      Optional full PostgreSQL connection string override.
+      When set, DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD are not prompted.
   REDIS_CONN_STRING
       Optional Redis connection string.
   PORT
@@ -511,8 +603,11 @@ Environment variables:
       Optional exact Release asset name.
 
 Example:
-  ASSET_NAME="superai-api-linux-amd64" \
-  sudo bash install-superai-api.sh install
+  DB_HOST="10.0.0.20" \
+  DB_NAME="superai" \
+  DB_USER="superai" \
+  DB_PASSWORD="YOUR_DB_PASSWORD" \
+  sudo -E bash install-superai-api.sh install
 
 EOF
 }
