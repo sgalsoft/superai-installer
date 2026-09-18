@@ -12,11 +12,81 @@ The installer supports:
 - Latest stable GitHub release discovery
 - Private GitHub release asset download using a Fine-grained PAT
 - SHA-256 verification when GitHub provides an asset digest
-- PostgreSQL configuration
+- PostgreSQL over the internal network
+- Dedicated PostgreSQL role and database defaults
 - Optional Redis configuration
 - systemd service installation and restart
 - Upgrade with automatic binary backup and rollback
 - Status, restart, and uninstall commands
+
+## postgres
+
+The installer now uses a dedicated PostgreSQL role and database:
+
+```text
+database: superai
+user:     superai
+port:     5432
+network:  internal/private network
+```
+
+The PostgreSQL host must be a private/internal hostname or IP address. The installer rejects:
+
+```text
+localhost
+127.0.0.1
+127.x.x.x
+::1
+0.0.0.0
+```
+
+For example:
+
+```text
+10.0.0.20:5432
+```
+
+or:
+
+```text
+postgres.internal:5432
+```
+
+The application still receives the final PostgreSQL connection through `SQL_DSN`, but the installer can build it from the individual internal database settings.
+
+### create the postgres role and database
+
+Run `create-superai-database.sh` on the PostgreSQL server, or from a host that can reach PostgreSQL over the internal network.
+
+```bash
+chmod +x create-superai-database.sh
+./create-superai-database.sh
+```
+
+Defaults:
+
+```text
+PGHOST=127.0.0.1
+PGPORT=5432
+PGUSER=postgres
+PGDATABASE=postgres
+
+DB_USER=superai
+DB_NAME=superai
+```
+
+The script prompts for the password of the `superai` database user and does not write it to disk.
+
+For a remote PostgreSQL server on the private network:
+
+```bash
+PGHOST="10.0.0.20" \
+PGPORT="5432" \
+PGUSER="postgres" \
+./create-superai-database.sh
+```
+
+The PostgreSQL admin connection must already be authorized to create roles and databases.
 
 ## requirements
 
@@ -24,7 +94,8 @@ The installer supports:
 - `root` privileges
 - Network access to GitHub
 - A GitHub Fine-grained Personal Access Token with **Contents: Read** access to `sgalcheung/superai-api`
-- PostgreSQL reachable using the configured `SQL_DSN`
+- PostgreSQL reachable through the configured internal/private network address
+- The `superai` PostgreSQL role and database must exist before the application starts, unless you create them with `create-superai-database.sh`
 - Redis is optional
 
 ## install
@@ -35,7 +106,16 @@ The default installation mode is interactive. Run:
 curl -fsSL https://raw.githubusercontent.com/sgalsoft/superai-installer/main/install-superai-api.sh | sudo bash
 ```
 
-The installer will securely prompt for the GitHub Fine-grained PAT and PostgreSQL connection string when they are not provided through environment variables. The GitHub token is read without echoing and is not written to the application `.env`, systemd unit, installation directory, or repository.
+The installer securely prompts for the GitHub Fine-grained PAT and PostgreSQL internal connection settings when they are not provided through environment variables. The GitHub token is read without echoing and is not written to the application `.env`, systemd unit, installation directory, or repository.
+
+During interactive installation, PostgreSQL defaults are:
+
+```text
+host:     PostgreSQL internal host
+port:     5432
+database: superai
+user:     superai
+```
 
 You can also run a local copy:
 
@@ -68,20 +148,40 @@ For the normal interactive installation, do not put the token on the command lin
 
 ### optional non-interactive mode
 
-For automated server provisioning, `GITHUB_TOKEN` can be supplied through the environment:
+For automated server provisioning, use the PostgreSQL internal address and the dedicated database credentials:
 
 ```bash
 GITHUB_TOKEN="YOUR_FINE_GRAINED_PAT" \
-SQL_DSN="postgres://user:password@127.0.0.1:5432/newapi" \
+DB_HOST="10.0.0.20" \
+DB_PORT="5432" \
+DB_NAME="superai" \
+DB_USER="superai" \
+DB_PASSWORD="YOUR_DB_PASSWORD" \
 REDIS_CONN_STRING="redis://127.0.0.1:6379" \
 PORT="3000" \
 TZ="Asia/Shanghai" \
 sudo -E bash install-superai-api.sh install
 ```
 
+The installer builds:
+
+```text
+postgresql://superai:<password>@10.0.0.20:5432/superai?sslmode=disable
+```
+
+Passwords are URL-encoded before the DSN is written to `/opt/superai-api/.env`.
+
+For compatibility, a full `SQL_DSN` can still be supplied directly. When `SQL_DSN` is set, the installer uses it as an override.
+
+```bash
+GITHUB_TOKEN="YOUR_FINE_GRAINED_PAT" \
+SQL_DSN="postgresql://superai:YOUR_DB_PASSWORD@10.0.0.20:5432/superai?sslmode=disable" \
+sudo -E bash install-superai-api.sh install
+```
+
 The environment variable is optional; **interactive input remains the default**.
 
-For security, never commit the token to this repository.
+For security, never commit the GitHub token or database password to this repository.
 
 ## commands
 
@@ -134,7 +234,9 @@ The service runs as the dedicated `superai-api` system user.
 ## security notes
 
 - Keep the GitHub token private.
+- Keep the PostgreSQL password private.
 - Use a Fine-grained PAT scoped only to `sgalcheung/superai-api` with **Contents: Read**.
+- Keep PostgreSQL on the private/internal network and restrict port `5432` with your firewall or security group.
 - The installer does not store the GitHub token in `/opt/superai-api/.env`.
 - The application `.env` is created with mode `0600`.
 - The systemd service runs without root privileges and uses service hardening options.
@@ -146,11 +248,11 @@ The service runs as the dedicated `superai-api` system user.
 release side:
 sgalcheung/superai-api
         │
-        │ GitHub Actions
-        │ GITHUB_TOKEN
+        │ github actions
+        │ github token
         │ contents: write
         ▼
-GitHub release
+github release
         │
         ├── superai-api-linux-amd64
         └── superai-api-linux-arm64
@@ -158,16 +260,16 @@ GitHub release
 installer side:
 sgalsoft/superai-installer
         │
-        │ Fine-grained PAT
+        │ fine-grained pat
         │ contents: read
         ▼
-private GitHub release
+private github release
         │
         ▼
 /opt/superai-api
 ```
 
-The Actions `GITHUB_TOKEN` and the installer Fine-grained PAT are separate credentials with separate responsibilities. The installer PAT is never embedded in the public repository or GitHub Actions workflow.
+The actions `GITHUB_TOKEN` and the installer Fine-grained PAT are separate credentials with separate responsibilities. The installer PAT is never embedded in the public repository or GitHub Actions workflow.
 
 ## license
 
