@@ -51,9 +51,18 @@ GITHUB_API="https://api.github.com"
 GITHUB_API_VERSION="2026-03-10"
 DEFAULT_PORT="3000"
 DEFAULT_TZ="Asia/Shanghai"
+DEFAULT_DB_PORT="5432"
+DEFAULT_DB_NAME="superai"
+DEFAULT_DB_USER="superai"
 BACKUP_RETENTION="5"
 PORT="${PORT:-${DEFAULT_PORT}}"
 TZ="${TZ:-${DEFAULT_TZ}}"
+DB_HOST="${DB_HOST:-}"
+DB_PORT="${DB_PORT:-${DEFAULT_DB_PORT}}"
+DB_NAME="${DB_NAME:-${DEFAULT_DB_NAME}}"
+DB_USER="${DB_USER:-${DEFAULT_DB_USER}}"
+DB_PASSWORD="${DB_PASSWORD:-}"
+SQL_DSN="${SQL_DSN:-}"
 ASSET_NAME="${ASSET_NAME:-}"
 TMP_DIR=""
 RELEASE_FILE=""
@@ -278,7 +287,7 @@ prepare_directories() {
     success "Directories prepared."
 }
 generate_secret() { if command_exists openssl; then openssl rand -hex 32; return; fi; od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
-urlencode() { jq -nr --arg value "$1" '${value}|@uri'; }
+urlencode() { jq -nr --arg value "$1" '$value|@uri'; }
 env_get() { local key="$1"; [[ -f "${ENV_FILE}" ]] || return 0; awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, "", $0); print $0; exit}' "${ENV_FILE}"; }
 env_has() { local key="$1"; grep -Eq "^${key}=" "${ENV_FILE}" 2>/dev/null; }
 env_set_if_missing() { local key="$1" value="$2"; if ! env_has "${key}"; then printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"; fi; }
