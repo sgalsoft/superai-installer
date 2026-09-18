@@ -379,8 +379,12 @@ initialize_postgres_database() {
     [[ -n "${DB_HOST}" ]] || die "DB_HOST cannot be empty."
     [[ -n "${DB_USER}" ]] || die "DB_USER cannot be empty."
     [[ -n "${DB_NAME}" ]] || die "DB_NAME cannot be empty."
-    [[ -n "${DB_PASSWORD}" ]] || die "DB_PASSWORD cannot be empty."
     [[ -n "${DB_ADMIN_USER}" ]] || die "DB_ADMIN_USER cannot be empty."
+
+    if [[ -z "${DB_PASSWORD}" ]]; then
+        read_secret "PostgreSQL password (${DB_USER}): " DB_PASSWORD
+    fi
+    [[ -n "${DB_PASSWORD}" ]] || die "DB_PASSWORD cannot be empty."
 
     if [[ -z "${DB_ADMIN_PASSWORD}" ]]; then
         echo
