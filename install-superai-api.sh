@@ -69,6 +69,8 @@ DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}"
 DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD:-}"
 SKIP_DB_INIT="${SKIP_DB_INIT:-false}"
 SQL_DSN="${SQL_DSN:-}"
+SQL_DSN_EXPLICIT=false
+if [[ -n "${SQL_DSN}" ]]; then SQL_DSN_EXPLICIT=true; fi
 ASSET_NAME="${ASSET_NAME:-}"
 TMP_DIR=""
 RELEASE_FILE=""
@@ -369,8 +371,8 @@ initialize_postgres_database() {
         return
     fi
 
-    if [[ -n "${SQL_DSN:-}" ]]; then
-        log "SQL_DSN override is set; PostgreSQL role/database initialization skipped."
+    if [[ "${SQL_DSN_EXPLICIT}" == "true" ]]; then
+        log "SQL_DSN was provided explicitly; PostgreSQL role/database initialization skipped."
         return
     fi
 
@@ -402,25 +404,22 @@ initialize_postgres_database() {
         -v superai_db_name="${DB_NAME}" <<'SQL'
 \getenv superai_db_password SUPERAI_DB_PASSWORD
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = :'superai_db_user'
-    ) THEN
-        EXECUTE format(
-            'CREATE ROLE %I LOGIN PASSWORD %L',
-            :'superai_db_user',
-            :'superai_db_password'
-        );
-    ELSE
-        EXECUTE format(
-            'ALTER ROLE %I LOGIN PASSWORD %L',
-            :'superai_db_user',
-            :'superai_db_password'
-        );
-    END IF;
-END
-$$;
+SELECT format(
+    'CREATE ROLE %I LOGIN PASSWORD %L',
+    :'superai_db_user',
+    :'superai_db_password'
+)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = :'superai_db_user'
+) \gexec
+
+SELECT format(
+    'ALTER ROLE %I LOGIN PASSWORD %L',
+    :'superai_db_user',
+    :'superai_db_password'
+) \gexec
 
 SELECT format(
     'CREATE DATABASE %I OWNER %I',
@@ -442,7 +441,7 @@ WHERE EXISTS (
     SELECT 1
     FROM pg_database
     WHERE datname = :'superai_db_name'
-      AND pg_get_userbyid(datdba) = :'superai_db_user'
+      AND pg_get_userbyid(datdba) <> :'superai_db_user'
 ) \gexec
 SQL
     then
@@ -551,7 +550,9 @@ backup_current_binary() {
 }
 cleanup_old_backups() {
     mapfile -t backups < <(find "${BACKUP_DIR}" -maxdepth 1 -type f -name "${APP_NAME}-*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | awk 'NR > '"${BACKUP_RETENTION}"' {print $2}')
-    [[ "${#backups[@]}" -gt 0 ]] && rm -f -- "${backups[@]}"
+    if [[ "${#backups[@]}" -gt 0 ]]; then
+        rm -f -- "${backups[@]}"
+    fi
 }
 install_downloaded_binary() {
     section "Installing binary"
