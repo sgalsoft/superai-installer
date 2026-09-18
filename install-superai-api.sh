@@ -24,6 +24,9 @@
 #   DB_NAME
 #   DB_USER
 #   DB_PASSWORD
+#   DB_ADMIN_USER
+#   DB_ADMIN_PASSWORD
+#   SKIP_DB_INIT
 #   SQL_DSN
 #   REDIS_CONN_STRING
 #   PORT
@@ -62,6 +65,9 @@ DB_PORT="${DB_PORT:-${DEFAULT_DB_PORT}}"
 DB_NAME="${DB_NAME:-${DEFAULT_DB_NAME}}"
 DB_USER="${DB_USER:-${DEFAULT_DB_USER}}"
 DB_PASSWORD="${DB_PASSWORD:-}"
+DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}"
+DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD:-}"
+SKIP_DB_INIT="${SKIP_DB_INIT:-false}"
 SQL_DSN="${SQL_DSN:-}"
 ASSET_NAME="${ASSET_NAME:-}"
 TMP_DIR=""
@@ -122,6 +128,15 @@ install_dependencies() {
     command_exists curl || packages+=("curl")
     command_exists jq || packages+=("jq")
     if ! command_exists sha256sum && ! command_exists openssl; then packages+=("openssl"); fi
+    command_exists psql || {
+        if command_exists apt-get || command_exists apk; then
+            packages+=("postgresql-client")
+        elif command_exists dnf || command_exists yum; then
+            packages+=("postgresql")
+        else
+            die "PostgreSQL client (psql) is required. Please install it manually."
+        fi
+    }
     if [[ "${#packages[@]}" -eq 0 ]]; then success "Required dependencies are installed."; return; fi
     log "Installing: ${packages[*]}"
     if command_exists apt-get; then
@@ -345,6 +360,110 @@ configure_database() {
     log "PostgreSQL user: ${DB_USER}"
 }
 
+
+initialize_postgres_database() {
+    section "Preparing PostgreSQL database"
+
+    if [[ "${SKIP_DB_INIT}" == "true" ]]; then
+        warn "SKIP_DB_INIT=true; PostgreSQL role/database initialization skipped."
+        return
+    fi
+
+    if [[ -n "${SQL_DSN:-}" ]]; then
+        log "SQL_DSN override is set; PostgreSQL role/database initialization skipped."
+        return
+    fi
+
+    [[ -n "${DB_HOST}" ]] || die "DB_HOST cannot be empty."
+    [[ -n "${DB_USER}" ]] || die "DB_USER cannot be empty."
+    [[ -n "${DB_NAME}" ]] || die "DB_NAME cannot be empty."
+    [[ -n "${DB_PASSWORD}" ]] || die "DB_PASSWORD cannot be empty."
+    [[ -n "${DB_ADMIN_USER}" ]] || die "DB_ADMIN_USER cannot be empty."
+
+    if [[ -z "${DB_ADMIN_PASSWORD}" ]]; then
+        echo
+        echo -e "${BOLD}PostgreSQL administrator credentials${RESET}"
+        echo
+        echo "These credentials are used only to create the dedicated"
+        echo "application role/database. They are never written to ${ENV_FILE}."
+        echo
+        read_secret "PostgreSQL admin password (${DB_ADMIN_USER}): " DB_ADMIN_PASSWORD
+    fi
+    [[ -n "${DB_ADMIN_PASSWORD}" ]] || die "DB_ADMIN_PASSWORD cannot be empty."
+
+    export SUPERAI_DB_PASSWORD="${DB_PASSWORD}"
+
+    if ! PGPASSWORD="${DB_ADMIN_PASSWORD}" psql -X -v ON_ERROR_STOP=1 \
+        -h "${DB_HOST}" \
+        -p "${DB_PORT}" \
+        -U "${DB_ADMIN_USER}" \
+        -d "postgres" \
+        -v superai_db_user="${DB_USER}" \
+        -v superai_db_name="${DB_NAME}" <<'SQL'
+\getenv superai_db_password SUPERAI_DB_PASSWORD
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = :'superai_db_user'
+    ) THEN
+        EXECUTE format(
+            'CREATE ROLE %I LOGIN PASSWORD %L',
+            :'superai_db_user',
+            :'superai_db_password'
+        );
+    ELSE
+        EXECUTE format(
+            'ALTER ROLE %I LOGIN PASSWORD %L',
+            :'superai_db_user',
+            :'superai_db_password'
+        );
+    END IF;
+END
+$$;
+
+SELECT format(
+    'CREATE DATABASE %I OWNER %I',
+    :'superai_db_name',
+    :'superai_db_user'
+)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM pg_database
+    WHERE datname = :'superai_db_name'
+) \gexec
+
+SELECT format(
+    'ALTER DATABASE %I OWNER TO %I',
+    :'superai_db_name',
+    :'superai_db_user'
+)
+WHERE EXISTS (
+    SELECT 1
+    FROM pg_database
+    WHERE datname = :'superai_db_name'
+      AND pg_get_userbyid(datdba) = :'superai_db_user'
+) \gexec
+SQL
+    then
+        unset SUPERAI_DB_PASSWORD
+        die "PostgreSQL role/database initialization failed."
+    fi
+
+    unset SUPERAI_DB_PASSWORD DB_ADMIN_PASSWORD
+
+    if PGPASSWORD="${DB_PASSWORD}" psql -X -v ON_ERROR_STOP=1 \
+        -h "${DB_HOST}" \
+        -p "${DB_PORT}" \
+        -U "${DB_USER}" \
+        -d "${DB_NAME}" \
+        -c "SELECT 1;" >/dev/null 2>&1; then
+        success "PostgreSQL role/database ready: ${DB_USER}/${DB_NAME}"
+    else
+        die "PostgreSQL initialization completed, but the application credentials could not connect to ${DB_HOST}:${DB_PORT}/${DB_NAME}."
+    fi
+}
+
 create_env_file() {
     section "Configuring environment"
     umask 077
@@ -519,7 +638,7 @@ install_command() {
     section "Installing superai api"
     [[ ! -e "${INSTALL_DIR}" || ! -f "${BINARY_PATH}" ]] || die "superai api is already installed. Use 'upgrade' instead."
     validate_port; detect_arch; ensure_github_token; verify_github_access; prepare_tmp_dir; fetch_latest_release; find_release_asset; download_asset
-    ensure_service_user; prepare_directories; create_env_file; check_postgres; install_downloaded_binary; create_systemd_service
+    ensure_service_user; prepare_directories; create_env_file; initialize_postgres_database; check_postgres; install_downloaded_binary; create_systemd_service
     restart_and_verify || die "Installation completed, but the service failed to start."
     section "Installation completed"
     echo; echo -e "${GREEN}${BOLD}superai api installed successfully.${RESET}"; echo; echo "Version:"; echo "  ${RELEASE_VERSION}"; echo; echo "Binary:"; echo "  ${BINARY_PATH}"; echo; echo "Config:"; echo "  ${ENV_FILE}"; echo; echo "Service:"; echo "  ${APP_NAME}.service"; echo; echo "Port:"; echo "  ${PORT}"; echo; echo "Useful commands:"; echo "  systemctl status ${APP_NAME}"; echo "  systemctl restart ${APP_NAME}"; echo "  journalctl -u ${APP_NAME} -f"; echo
@@ -597,6 +716,16 @@ Environment variables:
         ${DEFAULT_DB_USER}
   DB_PASSWORD
       PostgreSQL password for DB_USER.
+  DB_ADMIN_USER
+      PostgreSQL administrator used to create the dedicated role/database.
+      Default:
+        postgres
+  DB_ADMIN_PASSWORD
+      Administrator password. Used only during installation and never saved.
+  SKIP_DB_INIT
+      Set to true to skip automatic role/database initialization.
+      Default:
+        false
   SQL_DSN
       Optional full PostgreSQL connection string override.
       When set, DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD are not prompted.
@@ -616,6 +745,8 @@ Example:
   DB_NAME="superai" \
   DB_USER="superai" \
   DB_PASSWORD="YOUR_DB_PASSWORD" \
+  DB_ADMIN_USER="postgres" \
+  DB_ADMIN_PASSWORD="YOUR_POSTGRES_ADMIN_PASSWORD" \
   sudo -E bash install-superai-api.sh install
 
 EOF
