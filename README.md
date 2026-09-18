@@ -56,37 +56,26 @@ The application still receives the final PostgreSQL connection through `SQL_DSN`
 
 ### create the postgres role and database
 
-Run `create-superai-database.sh` on the PostgreSQL server, or from a host that can reach PostgreSQL over the internal network.
+Database initialization is part of `install-superai-api.sh`.
+
+During a normal interactive install, the installer:
+
+1. Connects to the PostgreSQL server over the internal/private network.
+2. Prompts for the PostgreSQL administrator password.
+3. Creates the dedicated `superai` role when it does not exist.
+4. Creates the `superai` database when it does not exist.
+5. Verifies that the `superai` credentials can connect.
+6. Writes only the application database credentials to `/opt/superai-api/.env`.
+
+The PostgreSQL administrator password is used only during installation and is never written to the application `.env`.
+
+To use an existing database/user without initialization, set:
 
 ```bash
-chmod +x create-superai-database.sh
-./create-superai-database.sh
+SKIP_DB_INIT="true"
 ```
 
-Defaults:
-
-```text
-PGHOST=127.0.0.1
-PGPORT=5432
-PGUSER=postgres
-PGDATABASE=postgres
-
-DB_USER=superai
-DB_NAME=superai
-```
-
-The script prompts for the password of the `superai` database user and does not write it to disk.
-
-For a remote PostgreSQL server on the private network:
-
-```bash
-PGHOST="10.0.0.20" \
-PGPORT="5432" \
-PGUSER="postgres" \
-./create-superai-database.sh
-```
-
-The PostgreSQL admin connection must already be authorized to create roles and databases.
+For compatibility, supplying a full `SQL_DSN` also skips automatic database initialization.
 
 ## requirements
 
@@ -95,7 +84,7 @@ The PostgreSQL admin connection must already be authorized to create roles and d
 - Network access to GitHub
 - A GitHub Fine-grained Personal Access Token with **Contents: Read** access to `sgalcheung/superai-api`
 - PostgreSQL reachable through the configured internal/private network address
-- The `superai` PostgreSQL role and database must exist before the application starts, unless you create them with `create-superai-database.sh`
+- PostgreSQL administrator access is required for automatic role/database initialization
 - Redis is optional
 
 ## install
@@ -157,6 +146,8 @@ DB_PORT="5432" \
 DB_NAME="superai" \
 DB_USER="superai" \
 DB_PASSWORD="YOUR_DB_PASSWORD" \
+DB_ADMIN_USER="postgres" \
+DB_ADMIN_PASSWORD="YOUR_POSTGRES_ADMIN_PASSWORD" \
 REDIS_CONN_STRING="redis://127.0.0.1:6379" \
 PORT="3000" \
 TZ="Asia/Shanghai" \
